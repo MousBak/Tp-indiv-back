@@ -12,12 +12,39 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Configuration MongoDB
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/leboncoin_db')
-    .then(() => console.log('Connexion à MongoDB réussie'))
-    .catch(err => console.log('Erreur de connexion à MongoDB:', err));
+// Configuration MongoDB avec retry
+const connectWithRetry = async () => {
+    const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://mongodb:27017/leboncoin-clone';
+    console.log('Tentative de connexion à MongoDB...');
+    try {
+        await mongoose.connect(MONGODB_URI, {
+            useNewUrlParser: true,
+            useUnifiedTopology: true,
+            serverSelectionTimeoutMS: 5000
+        });
+        console.log('Connexion à MongoDB réussie');
+    } catch (err) {
+        console.error('Erreur de connexion à MongoDB:', err);
+        console.log('Nouvelle tentative dans 5 secondes...');
+        setTimeout(connectWithRetry, 5000);
+    }
+};
 
-// Utilisation des routes
+// Première tentative de connexion
+connectWithRetry();
+
+// Gestion de la déconnexion MongoDB
+mongoose.connection.on('disconnected', () => {
+    console.log('MongoDB déconnecté ! Tentative de reconnexion...');
+    connectWithRetry();
+});
+
+// Route racine
+app.get('/', (req, res) => {
+    res.json({ message: 'Bienvenue sur l\'API du clone Leboncoin' });
+});
+
+// Monter les routes
 app.use('/api', routes);
 
 // Gestion des erreurs
@@ -30,13 +57,19 @@ app.use((err, req, res, next) => {
     });
 });
 
+// Gestion des erreurs 404
+app.use((req, res) => {
+    res.status(404).json({ message: 'Route non trouvée' });
+});
 
 // Configuration du port
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 8081;
 
-// Démarrage du serveur
-app.listen(PORT, () => {
-    console.log(`Serveur démarré sur le port ${PORT}`);
+// Démarrage du serveur une fois MongoDB connecté
+mongoose.connection.once('open', () => {
+    app.listen(PORT, '0.0.0.0', () => {
+        console.log(`Serveur démarré sur le port ${PORT}`);
+    });
 });
 
 module.exports = app;
